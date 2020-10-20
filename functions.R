@@ -8,9 +8,9 @@ timeStamp <- function(comment)
 }
 
 
-pngStore <- function(plot_data, output_name, HEIGHT, WIDTH)
+pngStore <- function(plot_data, output_name, H, W, RES=600)
 {
-    png(output_name, height = HEIGHT, width = WIDTH, unit = "in", res = 600)
+    png(output_name, height=H, width=W, unit="in", res=RES)
     print(plot_data)
     dev.off()
 }

@@ -1,7 +1,7 @@
 library(Matrix)
 library(ggplot2)
 
-savePlots <- TRUE
+savePlots <- FALSE
 
 # cutoff threshold for QC
 cutoff.geneNum <- 1000
@@ -66,8 +66,12 @@ anno <- anno[qc, ]
 counts <- counts[rowSums(counts) != 0, ]
 
 # save QC'ed data
+# writeMM doesn't save row/column names, so they need to be saved separately.
 writeMM(counts, "counts_QCed_1000gene10MT.mtx")
 write.csv(anno, "annotation_QCed_1000gene10MT.csv", row.names=FALSE)
+write.csv(rownames(counts), "geneNames_nonZeroRemoved.csv")
+write.csv(colnames(counts), "cellNames_QCed_1000gene10MT.csv")
+print("QC'ed data saved.")
 
 # randomly sample 10% of the data
 set.seed(0)
@@ -77,7 +81,9 @@ anno <- anno[downsample, ]
 
 # save the reduced data
 writeMM(counts, "counts_QCed_1000gene10MT_reduced.mtx")
+write.csv(colnames(counts), "cellNames_QCed_1000gene10MT_reduced.csv")
 write.csv(anno, "annotation_QCed_1000gene10MT_reduced.csv", row.names=FALSE)
+print("Downsampled data saved.")
 
-print("Done!")
+print("All done!")
 
