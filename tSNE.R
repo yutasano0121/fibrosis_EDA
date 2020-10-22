@@ -29,7 +29,7 @@ source("functions.R")
 if (loadRData == FALSE){
     timeStamp("Data loading...")
     counts <- readMM("counts_QCed_1000gene10MT_reduced.mtx.gz")
-    anno <- read.csv("annotation_QCed_1000gene10MT_reduced.csv")
+    anno <- read.csv("annotation_QCed_1000gene10MT_reduced.csv", stringsAsFactors=FALSE)
     genes <- read.csv("geneNames_nonZeroRemoved.csv")
     cells <- read.csv("cellNames_QCed_1000gene10MT_reduced.csv")
     ecm <- read.csv("ECM_matrisome_hs_masterlist.csv", stringsAsFactors=FALSE)
@@ -42,6 +42,11 @@ if (loadRData == FALSE){
     cells_notCOPD <- anno$Disease_Identity != "COPD"
     counts <- counts[, cells_notCOPD]
     anno <- anno[cells_notCOPD, ]
+
+    # remove multiplets.
+    cells_notMultiplet <- anno$CellType_Category != "Multiplet"
+    counts <- counts[, cells_notMultiplet]
+    anno <- anno[cells_notMultiplet, ]
 
     # remove genes not expressed.
     expressedGenes <- rowSums(counts) != 0
@@ -70,7 +75,7 @@ if (loadRData == FALSE){
 
 
     if (saveRData==TRUE){
-        save(counts.ecm, anno, tsne, file="RData/ecm_tsne_reduced.RData")
+        save(counts.ecm, anno, tsne, ecm, file="RData/ecm_tsne_reduced.RData")
         timeStamp("RData saved.")
     }
 } else {
@@ -80,7 +85,10 @@ if (loadRData == FALSE){
 
 
 # make plots which do not require ECM information.
-p.celltype <- plot.tsne(DF=as.data.frame(tsne$Y), ANNO=anno)
+p.celltype <- plot.tsne(
+    DF=as.data.frame(tsne$Y), ANNO=anno,
+    COLOR='CellType_Category', COLOR.LAB='Cell types'
+)
 p.manuscript <- plot.tsne(
     DF=as.data.frame(tsne$Y), ANNO=anno,
     COLOR='Manuscript_Identity', COLOR.LAB='Cell subtypes'
@@ -98,7 +106,49 @@ p.subject <- plot.tsne(
     COLOR='Subject_Identity', COLOR.LAB='Subjects'
 )
 
+# make t-SNE plots with each of 4 major cell types
+# so subclasses are easier to distinguish by color.
+xmax <- max(tsne$Y[, 1])  # for setting axis limits
+xmin <- min(tsne$Y[, 1])
+ymax <- max(tsne$Y[, 2])
+ymin <- min(tsne$Y[, 2])
 
+cellTypes <- as.character(unique(anno$CellType_Category))
+p.sub.list <- sapply(
+    simplify=FALSE,
+    cellTypes,
+    function(type){
+        select_type <- anno$CellType_Category == type
+        p <- plot.tsne(
+            DF=as.data.frame(tsne$Y[select_type, ]), 
+            ANNO=anno[select_type, ],
+            COLOR='Manuscript_Identity', 
+            COLOR.LAB='Cell subtypes'
+        )
+        p <- p + xlim(xmin, xmax) + ylim(ymin, ymax)
+        return(p)
+    }
+)
+
+# save plots.
+pngStore(p.celltype, "tsne_reduced_cellType.png", W=10, H=10)
+pngStore(p.manuscript, "tsne_reduced_manuscriptIdent.png", W=14, H=10)
+# pngStore(p.subclass, "tsne_reduced_subclass.png", W=10, H=15) 
+pngStore(p.disease, "tsne_reduced_disease.png", W=10, H=10)
+pngStore(p.subject, "tsne_reduced_subject.png", W=12.5, H=10)
+
+lapply(
+    names(p.sub.list),
+    function(type)
+    pngStore(
+        p.sub.list[[type]], 
+        paste0("tsne_reduced_sub_", type, ".png"), 
+        W=7, H=5
+    )
+)
+
+
+# make plots excluding cells of choice.
 if (removeStromal == TRUE){
     print("Plot without stromal cells.")
     notEndo <- anno$CellType_Category != "Stromal"
@@ -172,11 +222,9 @@ p.ecm.score <- sapply(
         )
     }
 )
-pngStore(p.celltype, "tsne_reduced_cellType.png", W=10, H=10)
-pngStore(p.manuscript, "tsne_reduced_manuscriptIdent.png", W=12.5, H=10)
-# pngStore(p.subclass, "tsne_reduced_subclass.png", W=10, H=15) 
-pngStore(p.disease, "tsne_reduced_disease.png", W=10, H=10)
-pngStore(p.subject, "tsne_reduced_subject.png", W=12.5, H=10)
+
+
+# save plots.
 if (removeStromal == TRUE){
     lapply(
         names(p.ecm.score),
@@ -208,5 +256,6 @@ if (removeStromal == TRUE){
         )
     )
 }
+
 
 timeStamp("Done!")
