@@ -8,7 +8,7 @@ library(viridis)
 saveRData <- TRUE
 loadRData <- TRUE
 removeStromal <- FALSE  # since they have too high expression of ECM genes...
-removeTop <- TRUE  # remove top ECM expressors
+removeTop <- FALSE  # remove top ECM expressors
 ecmThreshold <- 0.975  # percentile threshold for ECM expression
 
 # if edgeR is not used...
@@ -123,7 +123,7 @@ p.sub.list <- sapply(
             DF=as.data.frame(tsne$Y[select_type, ]), 
             ANNO=anno[select_type, ],
             COLOR='Manuscript_Identity', 
-            COLOR.LAB='Cell subtypes'
+            COLOR.LAB=type
         )
         p <- p + xlim(xmin, xmax) + ylim(ymin, ymax)
         return(p)
