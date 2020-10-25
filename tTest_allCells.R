@@ -2,8 +2,6 @@ library(parallel)
 library(Matrix)
 library(edgeR)
 
-detectCores()
-
 loadRData <- FALSE
 gene_freq_cutoff <- 0.1  # cutoff to decide how many genes are tested
 
@@ -15,7 +13,7 @@ if (loadRData == FALSE){  # requires > 100GB memory.
 
     counts <- readMM("counts_QCed_1000gene10MT.mtx.gz")
     anno <- read.csv("annotation_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
-    ecm <- read.csv("annotation_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
+    ecm <- read.csv("ECM_matrisome_hs_masterlist.csv", stringsAsFactors=FALSE)
     ecm <- ecm[, c("Division", "Category", "Gene.Symbol")]
     genes <- read.csv("geneNames_nonZeroRemoved.csv", stringsAsFactors=FALSE)
     cells <- read.csv("cellNames_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
@@ -56,15 +54,13 @@ if (loadRData == FALSE){  # requires > 100GB memory.
         }
     )
     list.counts.normalized <- mclapply(
-        mc.cores=15,
+        mc.cores=20,
         1:15,
         function(i){
             timeStamp(paste("Normalizing batch", i, "/ 15."))
-            return(cpm(
-                counts[, col_indices[[i]]],
-                log=TRUE,
-                prior.count=1
-            ))
+            out <- cpm(counts[, col_indices[[i]]])
+            out <- log2(out + 1)
+            return(signif(out, 4))
         }
     )
     rm(counts)
@@ -106,7 +102,7 @@ t_test.mc <- function(DF, CATEGORY, CATEGORY_NAME=NULL){  # DF = genes x cells
     print(paste("T-test is run for", sum(genes.expressed), "genes."))
 
     t.result <- mclapply(
-        mc.cores=15,  # use max core - 1.
+        mc.cores=20,  # use max core - 1.
         rownames(DF)[genes.expressed],
         function(gene){
             print(paste(
@@ -212,7 +208,7 @@ if (TRUE){
             timeStamp(paste("T-test run for", cat, "to find cell type markers."))
             print(paste(which(unique(anno$category) == cat), "out of", length(unique(anno$category)), "categories."))
 
-            t <- t_test(counts.logcpm[ecm$Gene.Symbol, ], anno$category == cat, cat)
+            t <- t_test.mc(counts.logcpm[rownames(counts.logcpm) %in% ecm$Gene.Symbol, ], anno$category == cat, cat)
             print(head(t))
             return(t)
         }
@@ -221,7 +217,8 @@ if (TRUE){
     #t.markers.list[["Macrophage"]] <- t <- t_test(counts.logcpm, anno$Manuscript_Identity == "Macrophage", "Macrophage")
 
     # save the results.
-    lapply(
+    mclapply(
+        mc.cores=20,
         names(t.markers.list),
         function(n){
             write.csv(t.markers.list[[n]], paste0("DE/tTest_markers_", n, ".csv"))
