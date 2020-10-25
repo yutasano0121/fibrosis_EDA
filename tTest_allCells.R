@@ -15,8 +15,10 @@ if (loadRData == FALSE){  # requires > 100GB memory.
 
     counts <- readMM("counts_QCed_1000gene10MT.mtx.gz")
     anno <- read.csv("annotation_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
-    genes <- read.csv("geneNames_nonZeroRemoved.csv")
-    cells <- read.csv("cellNames_QCed_1000gene10MT.csv")
+    ecm <- read.csv("annotation_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
+    ecm <- ecm[, c("Division", "Category", "Gene.Symbol")]
+    genes <- read.csv("geneNames_nonZeroRemoved.csv", stringsAsFactors=FALSE)
+    cells <- read.csv("cellNames_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
     timeStamp("Data loaded.")
 
     rownames(counts) <- genes$x
@@ -72,7 +74,7 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     rm(list.counts.normalized)
     timeStamp("Counts log2-cpm transformed.")
 
-    save(counts.logcpm, anno, file="RData/QCed_log2cpm_allCells_allGenes.RData")
+    save(counts.logcpm, anno, ecm, file="RData/QCed_log2cpm_allCells_allGenes.RData")
 
     timeStamp("Data loaded and normalized. RData saved.")
 } else {
@@ -188,7 +190,7 @@ lapply(
 # also save a combined result.
 write.csv(do.call(rbind, t.IPFvsCtrl.list), "DE/tTest_IPFvsCtrl_combined.csv")
 
-if (FALSE){
+if (TRUE){
     # divide macrophages by disease states for marker gene identification.
     Mf_d <- (anno$Manuscript_Identity == "Macrophage") & (anno$Disease_Identity == "IPF")
     Mf_n <- (anno$Manuscript_Identity == "Macrophage") & (anno$Disease_Identity == "Control")
@@ -202,7 +204,7 @@ if (FALSE){
     rm(Mf_d, Mf_n, MfA_d, MfA_n)
 
 
-    timeStamp("Find marker genes in each category.")
+    timeStamp("Find marker ECM genes in each cell type.")
     t.markers.list <- sapply(
         simplify=FALSE,
         unique(anno$category),
@@ -210,14 +212,13 @@ if (FALSE){
             timeStamp(paste("T-test run for", cat, "to find cell type markers."))
             print(paste(which(unique(anno$category) == cat), "out of", length(unique(anno$category)), "categories."))
 
-            # compare IPF vs. Control.
-            t <- t_test(counts.logcpm, anno$category == cat, cat)
+            t <- t_test(counts.logcpm[ecm$Gene.Symbol, ], anno$category == cat, cat)
             print(head(t))
             return(t)
         }
     )
-    timeStamp("T-test run for MAcrophage to find cell type markers.")
-    t.markers.list[["Macrophage"]] <- t <- t_test(counts.logcpm, anno$Manuscript_Identity == "Macrophage", "Macrophage")
+    #timeStamp("T-test run for Macrophage to find cell type markers.")
+    #t.markers.list[["Macrophage"]] <- t <- t_test(counts.logcpm, anno$Manuscript_Identity == "Macrophage", "Macrophage")
 
     # save the results.
     lapply(

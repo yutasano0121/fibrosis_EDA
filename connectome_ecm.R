@@ -6,7 +6,7 @@ sources("functions.R")
 timeStamp("Data loading and preprocessing...")
 
 # genes upregulated in IPF
-deg <- read.csv("DE/tTest_IPFvsCtrl_combined.csv")
+deg <- read.csv("DE/tTest_IPFvsCtrl_combined.csv", stringsAsFactors=FALSE)
 deg <- deg[deg$logFC >= 1, ]  # more than 2-fold upregulation
 
 # ECM genes
@@ -22,85 +22,60 @@ ligRec <- ligRec[grep("EXCLUDED", ligRec$Pair.Evidence, invert=TRUE), ]
 # remove interactions not related to ECM
 lig_ecm <- ligRec$Ligand.ApprovedSymbol %in% ecm
 rec_ecm <- ligRec$Receptor.ApprovedSymbol %in% ecm
-ligRec <- ligRec[lig_ecm | rec_ecm, ]
+ligRec_ecm <- ligRec[lig_ecm | rec_ecm, ]
 
-# fetch DEGs of Mf, alveolar Mf, and aberrant basaloid
-cellType_ofInterest <- c("Macrophage", "Macrophage_Alveolar", "Aberrant_Basaloid")
-graph.list <- lapply(
-    cellType_ofInterest,
-    function(type){
-        deg.target <- deg$gene[deg$cellType == type]  # returns a character vector
-        deg.others <- deg[deg$cellType != type, ]  # returns a data frame
+# fetch DEGs related to ligand-receptor ECM interaction
+deg_lig <- deg$gene %in% ligRec$Ligand.ApprovedSymbol
+deg_rec <- deg$gene %in% ligRec$Receptor.ApprovedSymbol
+deg_ligRec <- deg[deg_lig | deg_rec, ]  
 
-        # ligands and receptors in Mf-upregulated genes
-        deg.target.lig <- deg.target[deg.target %in% ligRec$Ligand.ApprovedSymbol]
-        deg.target.rec <- deg.target[scBcells %in% ligRec$Receptor.ApprovedSymbol]
-
-        # Subset the ligand-receptor list with those present in scBcells.
-        lig_inTarget <- ligRec$Ligand.ApprovedSymbol %in% deg.target.lig
-        rec_inTarget <- ligRec$Receptor.ApprovedSymbol %in% deg.target.rec
-        ligRec.sub <- ligRec[lig_inMF | rec_inTarget, ]
-
-        # ligands and receptors present in both Mf and other cells.
-        deg.others.lig <- deg.others$gene %in% ligRec.sub$Ligand.ApprovedSymbol
-        deg.others.rec <- deg.others$gene %in% ligRec.sub$Receptor.ApprovedSymbol
-        deg.others.ligRec <- deg.others[deg.others.lig | deg.others.rec, ]
-
-        target.ligRec.list <- lapply(
-            c(deg.target.lig, deg.target.rec),
-            function(x){return(c("Macrophage", x))}
-        )
-
-        others.ligRec.list <- lapply(
-            1:dim(deg.others.ligRec)[1],
-            function(i){
-                return(c(deg.others.ligRec$cellType[i], deg.others.ligRec$gene[i]))
-            }
-        )
-
-        # Detect ligand-receptor pairs present between B cells and tissues.
-        all.lig <- unique(c(deg.target.lig, deg.others$gene[deg.others.lig]))
-        all.rec <- unique(c(deg.target.rec, deg.others$gene[deg.others.rec]))
-
-        fetch.ligRecPairs <- 
-
-        # CAUTION: produces a lot of null values
-        ligRecPairs <- lapply(
-            1:dim(ligRec.sub)[1], 
-            function(i){
-                if (
-                    (ligRec.sub$Ligand.ApprovedSymbol[i] %in% all.lig) &
-                    (ligRec.sub$Receptor.ApprovedSymbol[i] %in% all.rec)
-                ){
-                    return(c(
-                            as.character(ligRec.sub$Ligand.ApprovedSymbol[i]),
-                            as.character(ligRec.sub$Receptor.ApprovedSymbol[i])
-                    ))
-                }
-            }
-        )
-
-
-        # make a data frame to make igraph object
-        df <- rbind(
-            do.call(rbind, target.ligRec.list),
-            do.call(rbind, others.ligRec.list),
-            do.call(rbind, ligRecPairs)
-        )
-
-        # make an igraph object
-        g <- graph.data.frame(df)
-        V(g)$ligRecPairs <- TRUE
-        V(g)$ligRecPairs[1 : length(target.ligRec) + length(others.ligRec)] <- FALSE
-        V(g)$category <- "Source"
-        V(g)$category[V(g)$name %in% all.lig] <- "Ligand"
-        V(g)$category[V(g)$name %in% all.rec] <- "Receptor"
-        V(g)$Paired <- FALSE
-        V(g)$Paired[V(g)$name %in% as.character(do.call(rbind, ligRecPairs))] <- TRUE
-
-        return(g)
+# fetch paired ligand and receptor genes present in deg
+deg_lig_names <- unique(deg_ligRec$gene[deg_ligRec$gene %in% ligRec$Ligand.ApprovedSymbol])
+deg_rec_names <- unique(deg_ligRec$gene[deg_ligRec$gene %in% ligRec$Receptor.ApprovedSymbol])
+ligRecPaired <- lapply(  # CAUTION: produces a lot of null values
+    1:dim(ligRec_ecm)[1], 
+    function(i){
+        if (
+            (ligRec_ecm$Ligand.ApprovedSymbol[i] %in% deg_lig_names) &
+            (ligRec_ecm$Receptor.ApprovedSymbol[i] %in% deg_rec_names)
+        ){
+            return(c(
+                    Ligand=ligRec_ecm$Ligand.ApprovedSymbol[i],
+                    Receptor=ligRec_ecm$Receptor.ApprovedSymbol[i]
+            ))
+        }
     }
 )
+ligRecPaired <- do.call(rbind, ligRecPaired)
+
+# remove genes not paired
+deg_lig_paired <- deg_ligRec$gene %in% ligRecPairs$Ligand.ApprovedSymbol
+deg_rec_paired <- deg_ligRec$gene %in% ligRecPairs$Receptor.ApprovedSymbol
+deg_ligRecPaired <- deg_ligRec[deg_lig_paired | deg_rec_paired, ]
+
+# make a category-ligRec pair list for making a graph
+deg_ligRecPaired.list <- lapply(
+    1:dim(deg_ligRecPaired)[1],
+    function(i){
+        return(c(deg.others.ligRec$cellType[i], deg.others.ligRec$gene[i]))
+    }
+)
+deg_ligRecPaired.list <- do.call(rbind, deg_ligRecPaired.list)
+
+
+# make a data frame to make igraph object
+df <- rbind(ligRecPaired, deg_ligRecPaired.list)
+
+# make an igraph object
+g <- graph.data.frame(df)
+V(g)$ligRecPaired <- FALSE
+V(g)$ligRecPaired[1 : length(ligRecPaired)] <- TRUE
+V(g)$category <- "Source"
+V(g)$category[V(g)$name %in% ligRecPaired$Ligand] <- "Ligand"
+V(g)$category[V(g)$name %in% ligRecPaired$Receptor] <- "Receptor"
+#V(g)$Paired <- FALSE
+#V(g)$Paired[V(g)$name %in% as.character(do.call(rbind, ligRecPairs))] <- TRUE
+
 
 # open Cytoscape
 cytoscapePing()
