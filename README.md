@@ -23,3 +23,7 @@
 ### List of ligand-receptor pairs
 * PairsLigRec.tsv
 <br />\* Fetched from https://fantom.gsc.riken.jp/5/suppl/Ramilowski_et_al_2015/
+
+## Differentially expressed genes
+### t-test was performed for the whole data set, using genes expressed at least 10% of cells of a cell type of interest.
+### 16 core, 200GB machine was used on GCP.
