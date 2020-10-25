@@ -4,7 +4,9 @@ library(edgeR)
 
 detectCores()
 
-loadRData <- TRUE
+loadRData <- FALSE
+gene_freq_cutoff <- 0.1  # cutoff to decide how many genes are tested
+
 
 source("functions.R")
 
@@ -15,7 +17,6 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     anno <- read.csv("annotation_QCed_1000gene10MT.csv", stringsAsFactors=FALSE)
     genes <- read.csv("geneNames_nonZeroRemoved.csv")
     cells <- read.csv("cellNames_QCed_1000gene10MT.csv")
-    ecm <- read.csv("ECM_matrisome_hs_masterlist.csv", stringsAsFactors=FALSE)
     timeStamp("Data loaded.")
 
     rownames(counts) <- genes$x
@@ -34,30 +35,36 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     timeStamp("Remove genes not expressed.")
     expressedGenes <- rowSums(counts) != 0
     counts <- counts[expressedGenes, ]
-    ecm <- ecm[ecm$Gene.Symbol %in% rownames(counts), ]
     rm(notCOPD, notMultiplet, notPNEC, expressedGenes)
 
     timeStamp("Log2-cpm transform the data.")
     # since the data are huge, transform them by batch and concatenate in the end.
-    batch <- round(dim(counts)[2] / 5)
-    range.begin <- 1
-    range.end <- batch
-    col_indices <- list()
-    for (i in 1:5){
-        if (i != 5){
-            range.sub <- range.begin:range.end
-        } else {range.sub <- range.begin:dim(counts)[2]}
+    batch_size <- round(dim(counts)[2] / 15)
+    col_indices <- mclapply(
+        mc.cores=15,
+        1:15,
+        function(i){
+            range.begin <- 1 + batch_size * (i - 1)
+            range.end <- batch_size * i
+            if (i != 15){
+                range.sub <- range.begin:range.end
+            } else {range.sub <- range.begin:dim(counts)[2]}
 
-        col_indices[[i]] <- range.sub
-
-        range.begin <- range.end + 1
-        range.end <- range.end + batch
-    }
-    list.counts.normalized = list()
-    for (i in 1:5){
-        timeStamp(paste0("Normalizing batch ", i, "/5."))
-        list.counts.normalized[[i]] <- cpm(counts[, col_indices[[i]]])
-    }
+            return(range.sub)
+        }
+    )
+    list.counts.normalized <- mclapply(
+        mc.cores=15,
+        1:15,
+        function(i){
+            timeStamp(paste("Normalizing batch", i, "/ 15."))
+            return(cpm(
+                counts[, col_indices[[i]]],
+                log=TRUE,
+                prior.count=1
+            ))
+        }
+    )
     rm(counts)
 
     # combine them into a single data frame.
@@ -65,7 +72,7 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     rm(list.counts.normalized)
     timeStamp("Counts log2-cpm transformed.")
 
-    save(counts.logcpm, anno, ecm, file="RData/QCed_log2cpm_allCells_allGenes.RData")
+    save(counts.logcpm, anno, file="RData/QCed_log2cpm_allCells_allGenes.RData")
 
     timeStamp("Data loaded and normalized. RData saved.")
 } else {
@@ -73,9 +80,6 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     load("RData/QCed_log2cpm_allCells_allGenes.RData")
     timeStamp("RData loaded.")
 }
-rm(ecm)
-
-gene_freq_cutoff <- 0.1  # cutoff to decide how many genes are tested
 
 
 timeStamp("Print distribution of IPF/Control in each category.")
