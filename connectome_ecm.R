@@ -1,13 +1,22 @@
 library(igraph)
 library(RCy3)
 
-sources("functions.R")
+source("functions.R")
 
 timeStamp("Data loading and preprocessing...")
 
+anno <- read.csv("annotation_QCed_1000gene10MT_reduced.csv", stringsAsFactors=FALSE)
+cellTypes <- sapply(
+    simplify=FALSE,
+    unique(anno$Manuscript_Identity),
+    function(type){
+        unique(anno$CellType_Category[anno$Manuscript_Identity == type])
+    }
+)
+
 # genes upregulated in IPF
 deg <- read.csv("DE/tTest_IPFvsCtrl_combined.csv", stringsAsFactors=FALSE)
-deg <- deg[deg$logFC >= 1, ]  # more than 2-fold upregulation
+deg <- deg[deg$logFC >= log2(2), ]  # more than 1.5-fold upregulation
 
 # ECM genes
 ecm <- read.csv("ECM_matrisome_hs_masterlist.csv", stringsAsFactors=FALSE)
@@ -40,27 +49,31 @@ ligRecPaired <- lapply(  # CAUTION: produces a lot of null values
             (ligRec_ecm$Receptor.ApprovedSymbol[i] %in% deg_rec_names)
         ){
             return(c(
-                    Ligand=ligRec_ecm$Ligand.ApprovedSymbol[i],
-                    Receptor=ligRec_ecm$Receptor.ApprovedSymbol[i]
+                    ligRec_ecm$Ligand.ApprovedSymbol[i],
+                    ligRec_ecm$Receptor.ApprovedSymbol[i]
             ))
         }
     }
 )
-ligRecPaired <- do.call(rbind, ligRecPaired)
+ligRecPaired <- as.data.frame(do.call(rbind, ligRecPaired))
+
+# remove pairs not related to Mf or alveolar Mf
+genes_mf <- deg_ligRec$gene[(deg_ligRec$cellType=="Macrophage") | (deg_ligRec$cellType=="Macrophage_Alveolar")]
+ligRecPaired <- ligRecPaired[(ligRecPaired$V1 %in% genes_mf) | (ligRecPaired$V2 %in% genes_mf), ]
 
 # remove genes not paired
-deg_lig_paired <- deg_ligRec$gene %in% ligRecPairs$Ligand.ApprovedSymbol
-deg_rec_paired <- deg_ligRec$gene %in% ligRecPairs$Receptor.ApprovedSymbol
+deg_lig_paired <- deg_ligRec$gene %in% ligRecPaired$V1
+deg_rec_paired <- deg_ligRec$gene %in% ligRecPaired$V2
 deg_ligRecPaired <- deg_ligRec[deg_lig_paired | deg_rec_paired, ]
 
 # make a category-ligRec pair list for making a graph
 deg_ligRecPaired.list <- lapply(
     1:dim(deg_ligRecPaired)[1],
     function(i){
-        return(c(deg.others.ligRec$cellType[i], deg.others.ligRec$gene[i]))
+        return(c(deg_ligRecPaired$cellType[i], deg_ligRecPaired$gene[i]))
     }
 )
-deg_ligRecPaired.list <- do.call(rbind, deg_ligRecPaired.list)
+deg_ligRecPaired.list <- as.data.frame(do.call(rbind, deg_ligRecPaired.list))
 
 
 # make a data frame to make igraph object
@@ -68,15 +81,21 @@ df <- rbind(ligRecPaired, deg_ligRecPaired.list)
 
 # make an igraph object
 g <- graph.data.frame(df)
-V(g)$ligRecPaired <- FALSE
+V(g)$ligRecPaired <- FALSE  # if each node is a ligand-receptor pair
 V(g)$ligRecPaired[1 : length(ligRecPaired)] <- TRUE
+V(g)$broadCellType <- "None"  # label each node by broad cell types
+for (i in 1:length(V(g))){
+    if (V(g)$name[i] %in% names(cellTypes)){
+        V(g)$broadCellType[i] <- cellTypes[[V(g)$name[i]]]
+    }
+}
 V(g)$category <- "Source"
-V(g)$category[V(g)$name %in% ligRecPaired$Ligand] <- "Ligand"
-V(g)$category[V(g)$name %in% ligRecPaired$Receptor] <- "Receptor"
+V(g)$category[V(g)$name %in% ligRecPaired$V1] <- "Ligand"
+V(g)$category[V(g)$name %in% ligRecPaired$V2] <- "Receptor"
 #V(g)$Paired <- FALSE
-#V(g)$Paired[V(g)$name %in% as.character(do.call(rbind, ligRecPairs))] <- TRUE
+#V(g)$Paired[V(g)$name %in% as.character(do.call(rbind, ligRecPaired))] <- TRUE
 
 
 # open Cytoscape
 cytoscapePing()
-createNetworkFromIgraph(g, "cell-tissue connectome")
+createNetworkFromIgraph(g, "ECM connectome")
