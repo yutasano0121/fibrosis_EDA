@@ -2,8 +2,11 @@ library(parallel)
 library(Matrix)
 library(edgeR)
 
-loadRData <- FALSE
+loadRData <- TRUE
+compareDiseases <- FALSE
+findMarkers <- TRUE
 gene_freq_cutoff <- 0.1  # cutoff to decide how many genes are tested
+nCore <- 15  # number of cores for mclapply
 
 
 source("functions.R")
@@ -41,7 +44,7 @@ if (loadRData == FALSE){  # requires > 100GB memory.
     # since the data are huge, transform them by batch and concatenate in the end.
     batch_size <- round(dim(counts)[2] / 15)
     col_indices <- mclapply(
-        mc.cores=15,
+        mc.cores=nCore,
         1:15,
         function(i){
             range.begin <- 1 + batch_size * (i - 1)
@@ -102,7 +105,7 @@ t_test.mc <- function(DF, CATEGORY, CATEGORY_NAME=NULL){  # DF = genes x cells
     print(paste("T-test is run for", sum(genes.expressed), "genes."))
 
     t.result <- mclapply(
-        mc.cores=20,  # use max core - 1.
+        mc.cores=nCore,  # use max core - 1.
         rownames(DF)[genes.expressed],
         function(gene){
             print(paste(
@@ -148,46 +151,49 @@ t_test.mc <- function(DF, CATEGORY, CATEGORY_NAME=NULL){  # DF = genes x cells
 
 
 
+if (compareDiseases){
+    timeStamp("Compare each cell subtypes for IPF vs. Control.")
+    categories <- unique(anno$Manuscript_Identity)
+    cat_exclude <- c("Aberrant_Basaloid")
+    categories <- categories[!categories %in% cat_exclude]
+    t.IPFvsCtrl.list <- sapply(
+        simplify=FALSE,
+        categories,
+        function(cat){
+            timeStamp(paste("T-test run for", cat, "comparing IPF vs. Control."))
+            print(paste(which(categories == cat), "out of", length(categories), "categories."))
 
-timeStamp("Compare each cell subtypes for IPF vs. Control.")
-categories <- unique(anno$Manuscript_Identity)
-cat_exclude <- c("Aberrant_Basaloid")
-categories <- categories[!categories %in% cat_exclude]
-t.IPFvsCtrl.list <- sapply(
-    simplify=FALSE,
-    categories,
-    function(cat){
-        timeStamp(paste("T-test run for", cat, "comparing IPF vs. Control."))
-        print(paste(which(categories == cat), "out of", length(categories), "categories."))
+            # subset by category.
+            cat_to_test <- anno$Manuscript_Identity == cat
+            # compare IPF vs. Control.
+            t <- t_test.mc(counts.logcpm[, cat_to_test], anno[cat_to_test, ]$Disease_Identity == "IPF", cat)
+            print(head(t))
+            return(t)
+        }
+    )
+    # compare Abberant Basaloids with other epithelial cells.
+    t.IPFvsCtrl.list[["Aberrant_Basaloid"]] <- t_test.mc(
+        counts.logcpm[, anno$CellType_Category=="Epithelial"], 
+        anno[anno$CellType_Category=="Epithelial", ]$Manuscript_Identity == "Aberrant_Basaloid", 
+        "Aberrant_Basaloid"
+    )
 
-        # subset by category.
-        cat_to_test <- anno$Manuscript_Identity == cat
-        # compare IPF vs. Control.
-        t <- t_test.mc(counts.logcpm[, cat_to_test], anno[cat_to_test, ]$Disease_Identity == "IPF", cat)
-        print(head(t))
-        return(t)
-    }
-)
-# compare Abberant Basaloids with other epithelial cells.
-t.IPFvsCtrl.list[["Aberrant_Basaloid"]] <- t_test.mc(
-    counts.logcpm[, anno$CellType_Category=="Epithelial"], 
-    anno[anno$CellType_Category=="Epithelial", ]$Manuscript_Identity == "Aberrant_Basaloid", 
-    "Aberrant_Basaloid"
-)
+    # save the results.
+    lapply(
+        names(t.IPFvsCtrl.list),
+        function(n){
+            write.csv(t.IPFvsCtrl.list[[n]], paste0("DE/tTest_IPFvsCtrl_", n, ".csv"))
+            return(NULL)
+        }
+    )
+    # also save a combined result.
+    write.csv(do.call(rbind, t.IPFvsCtrl.list), "DE/tTest_IPFvsCtrl_combined.csv")
 
-# save the results.
-lapply(
-    names(t.IPFvsCtrl.list),
-    function(n){
-        write.csv(t.IPFvsCtrl.list[[n]], paste0("DE/tTest_IPFvsCtrl_", n, ".csv"))
-        return(NULL)
-    }
-)
-# also save a combined result.
-write.csv(do.call(rbind, t.IPFvsCtrl.list), "DE/tTest_IPFvsCtrl_combined.csv")
+    timeStamp("T-test comparing disease vs normal done.")
+}
 
-if (TRUE){
-    # divide macrophages by disease states for marker gene identification.
+if (findMarkers){
+    # divide macrophages by disease states for marker gene identification if needed.
     Mf_d <- (anno$Manuscript_Identity == "Macrophage") & (anno$Disease_Identity == "IPF")
     Mf_n <- (anno$Manuscript_Identity == "Macrophage") & (anno$Disease_Identity == "Control")
     MfA_d <- (anno$Manuscript_Identity == "Macrophage_Alveolar") & (anno$Disease_Identity == "IPF")
@@ -200,15 +206,19 @@ if (TRUE){
     rm(Mf_d, Mf_n, MfA_d, MfA_n)
 
 
+    timeStamp("Subset the count matrix by ECM genes.")
+    counts.logcpm <- counts.logcpm[rownames(counts.logcpm) %in% ecm$Gene.Symbol, ]
+    
+
     timeStamp("Find marker ECM genes in each cell type.")
     t.markers.list <- sapply(
         simplify=FALSE,
-        unique(anno$category),
+        unique(anno$Manuscript_Identity),
         function(cat){
             timeStamp(paste("T-test run for", cat, "to find cell type markers."))
-            print(paste(which(unique(anno$category) == cat), "out of", length(unique(anno$category)), "categories."))
+            print(paste(which(unique(anno$Manuscript_Identity) == cat), "out of", length(unique(anno$Manuscript_Identity)), "categories."))
 
-            t <- t_test.mc(counts.logcpm[rownames(counts.logcpm) %in% ecm$Gene.Symbol, ], anno$category == cat, cat)
+            t <- t_test.mc(counts.logcpm, anno$Manuscript_Identity == cat, cat)
             print(head(t))
             return(t)
         }
@@ -218,7 +228,7 @@ if (TRUE){
 
     # save the results.
     mclapply(
-        mc.cores=20,
+        mc.cores=nCore,
         names(t.markers.list),
         function(n){
             write.csv(t.markers.list[[n]], paste0("DE/tTest_markers_", n, ".csv"))
@@ -227,6 +237,8 @@ if (TRUE){
     )
     # also save a combined result.
     write.csv(do.call(rbind, t.markers.list), "DE/tTest_markers_combined.csv")
+
+    timeStamp("T-test to find cell type markers done.")
 }
 
 timeStamp("Done!")
