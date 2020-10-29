@@ -1,6 +1,6 @@
 saveImage <- TRUE
 trimSize <- 0  # percentile to trim when calculating mean
-clustering <- FALES
+clustering <- FALSE
 num_cluster <- 6
 
 # packages
@@ -16,26 +16,72 @@ source("functions.R")
 
 # Load lists of marker genes.
 deg <- read.csv("DE/tTest_markers_combined.csv", stringsAsFactors=FALSE)
+# Reorder degs.
+ord <- with(deg, order(cellType, fdr, -logFC))
+deg <- deg[ord, ]
+# Select top 5 DEGs per category.
+top5 <- unlist(sapply(
+    simplify=FALSE,
+    unique(deg$cellType),
+    function(x){
+        d <- deg[deg$cellType == x, ]
+        return(d$gene[1:5])
+    }
+))
+# Remove dupulicates.
+top5 <- top5[!duplicated(top5)]
 
 # Load count data (10%)
-load("RData/")
+load("RData/ecm_tsne_reduced.RData")  # counts.ecm = cells x genes
+# Subset the data with DEGs.
+counts <- counts.ecm[, top5]
+rm(counts.ecm)
+
+# remove PNEC and Ionocyte
+cellToRetain <- (anno$Manuscript_Identity != "PNEC") & (anno$Manuscript_Identity != "Ionocyte")
+anno <- anno[cellToRetain, ]
+counts <- counts[cellToRetain, ]
+
 print("Data loaded.")
 
 
+
 # reorder the annotation
-ord <- with(anno, order(Manuscript_Identity, cellType_Category))
-anno <- anno[ord, ]
+#ord <- with(anno, order(Manuscript_Identity, cellType_Category))
+#anno <- anno[ord, ]
 
 # Take mean values in each category
 counts_mean <- aggregate(
-    t(counts),
+    counts,  # cells x genes
     by=list(anno$Manuscript_Identity),
     FUN=function(x){mean(x, trim=trimSize)}
-)
-rm(counts)
+)  # returns categories x genes
 
 rownames(counts_mean) <- counts_mean$Group.1
 counts_mean <- t(counts_mean[, -1])  # make it gene x category
+
+
+# Reorder row and column by cell types.
+anno$CellType_Category <- factor(
+    anno$CellType_Category, 
+    levels=c("Epithelial", "Endothelial", "Stromal", "Lymphoid", "Myeloid")
+)
+ord_cellType <- with(anno, order(CellType_Category, Manuscript_Identity))
+ord_cellType <- anno[ord_cellType, c("CellType_Category", "Manuscript_Identity")]
+
+counts_mean <- counts_mean[
+    order(factor(gsub("\\d$", "", names(top5)), levels=unique(ord_cellType$Manuscript_Identity))),
+    order(factor(colnames(counts_mean), levels=unique(ord_cellType$Manuscript_Identity)))
+]
+
+# Make a ordered annotation for heatmap columns.
+col_anno <- sapply(
+    colnames(counts_mean),
+    function(x){
+        return(anno$CellType_Category[anno$Manuscript_Identity == x][1])
+    }
+)
+col_anno <- data.frame(cellType=col_anno)
 
 
 # Scale the data across cells to have unit variance
@@ -96,7 +142,7 @@ if (clustering){
 } else {
     png(
         "image/heatmap_markers_mean_reduced.png",
-        height=8, width=8, units="in", res=300
+        height=20, width=12, units="in", res=300
     )
     pheatmap(
         counts_mean,
@@ -104,8 +150,15 @@ if (clustering){
         breaks=col_break,
         cluster_rows=FALSE,
         cluster_cols=FALSE,
-        show_rownames=FALSE,
-        angle_col=45,
+        show_rownames=TRUE,
+        annotation_col=col_anno,
+        annotation_colors=list(cellType=sapply(  # a list of named vectors
+            as.character(unique(col_anno$cellType)),
+            function(x){
+                return(plasma(5)[which(unique(col_anno$cellType) == x)])
+            }
+        )),
+        angle_col=315,
         fontsize=14,
     )
     dev.off()
